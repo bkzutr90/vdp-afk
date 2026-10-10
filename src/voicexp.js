@@ -1,4 +1,4 @@
-// XP dari voice: tiap menit, user yang tidak deafen dan berada di channel dengan minimal VOICE_MIN_USERS orang (bukan bot) dapat XP.
+// XP dari voice: tiap menit, user yang tidak deafen (dan tidak mute, kalau VOICE_REQUIRE_UNMUTED aktif) dan berada di channel dengan minimal VOICE_MIN_USERS orang (bukan bot) dapat XP.
 // Set VOICE_XP_DEBUG=1 untuk melihat di log kenapa seseorang dapat / tidak dapat XP.
 const cfg = require('./config');
 const { addXp } = require('./xp');
@@ -25,7 +25,12 @@ function startVoiceXp(client) {
         }
         if (member.user.bot) continue;
         if (!byChannel.has(vs.channelId)) byChannel.set(vs.channelId, []);
-        byChannel.get(vs.channelId).push({ id: vs.id, tag: member.user.tag, deaf: vs.selfDeaf || vs.serverDeaf });
+        byChannel.get(vs.channelId).push({
+          id: vs.id,
+          tag: member.user.tag,
+          deaf: vs.selfDeaf || vs.serverDeaf,
+          muted: vs.selfMute || vs.serverMute,
+        });
       }
 
       if (debug && byChannel.size === 0) log('tidak ada user (non-bot) di voice channel manapun');
@@ -39,6 +44,10 @@ function startVoiceXp(client) {
             log(`lewati ${h.tag}: sedang deafen`);
             continue;
           }
+          if (cfg.xp.voiceRequireUnmuted && h.muted) {
+            log(`lewati ${h.tag}: sedang mute`);
+            continue;
+          }
           const res = addXp(guild.id, h.id, perMinute, false);
           log(`+${perMinute} XP ke ${h.tag} (channel ${channelId}, total ${res.xp})`);
         }
@@ -46,7 +55,7 @@ function startVoiceXp(client) {
     }
   }, 60_000).unref();
 
-  console.log(`[voicexp] aktif: ${perMinute} XP/menit, minimal ${cfg.xp.voiceMinUsers} user di channel${debug ? ', debug ON' : ''}`);
+  console.log(`[voicexp] aktif: ${perMinute} XP/menit, minimal ${cfg.xp.voiceMinUsers} user di channel${cfg.xp.voiceRequireUnmuted ? ', wajib unmute' : ''}${debug ? ', debug ON' : ''}`);
 }
 
 module.exports = { startVoiceXp };
