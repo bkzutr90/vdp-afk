@@ -2,8 +2,10 @@ const { Client, GatewayIntentBits, MessageFlags, REST, Routes } = require('disco
 const cfg = require('./config');
 const { commands, handleButton } = require('./commands');
 const { addXp } = require('./xp');
+const { announceLevelUp } = require('./levelup');
 const { startAfk } = require('./voice');
 const { startVoiceXp } = require('./voicexp');
+const { startTempVoice } = require('./tempvoice');
 
 if (!cfg.token) {
   console.error('DISCORD_TOKEN wajib diisi (Variables di Railway / .env)');
@@ -32,6 +34,7 @@ client.once('clientReady', async () => {
   await registerCommands(client.user.id);
   startAfk(client).catch((err) => console.error('[afk] gagal start:', err));
   startVoiceXp(client);
+  startTempVoice(client);
 });
 
 // ---- XP dari chat (dengan cooldown per user)
@@ -46,10 +49,7 @@ client.on('messageCreate', (m) => {
   lastXp.set(key, now);
 
   const res = addXp(m.guildId, m.author.id, rand(cfg.xp.min, cfg.xp.max));
-  if (res.leveledUp && cfg.levelUpMessages) {
-    const ch = cfg.levelUpChannelId ? m.guild.channels.cache.get(cfg.levelUpChannelId) : m.channel;
-    ch?.send({ content: `🎉 ${m.author} naik ke **level ${res.level}**!`, allowedMentions: { users: [m.author.id] } }).catch(() => {});
-  }
+  if (res.leveledUp) announceLevelUp(m.guild, m.author.id, res.level, m.channelId);
 });
 setInterval(() => {
   const cutoff = Date.now() - cfg.xp.cooldownMs;

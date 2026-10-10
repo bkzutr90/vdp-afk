@@ -2,6 +2,7 @@
 // Set VOICE_XP_DEBUG=1 untuk melihat di log kenapa seseorang dapat / tidak dapat XP.
 const cfg = require('./config');
 const { addXp } = require('./xp');
+const { announceLevelUp } = require('./levelup');
 
 function startVoiceXp(client) {
   const perMinute = cfg.xp.voicePerMinute;
@@ -50,6 +51,7 @@ function startVoiceXp(client) {
           }
           const res = addXp(guild.id, h.id, perMinute, false);
           log(`+${perMinute} XP ke ${h.tag} (channel ${channelId}, total ${res.xp})`);
+          if (res.leveledUp) announceLevelUp(guild, h.id, res.level, channelId);
         }
       }
     }

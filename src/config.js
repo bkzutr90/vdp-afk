@@ -15,6 +15,9 @@ module.exports = {
   // Channel untuk notifikasi status bot AFK (terputus / masuk lagi / gagal). Kosong = tanpa notifikasi.
   logChannelId: process.env.LOG_CHANNEL_ID || null,
 
+  // Template nama voice sementara. {user} = nama pemilik.
+  tempVoiceName: process.env.TEMPVOICE_NAME || '🔊 {user}',
+
   // Channel untuk laporan background (/background report)
   reportChannelId: process.env.REPORT_CHANNEL_ID || null,
 

@@ -304,4 +304,8 @@ def(
   }
 );
 
+// ------------------------------------------------------------------ /tempvoice
+const { command: tempvoiceCommand } = require('./tempvoice');
+commands.set(tempvoiceCommand.data.name, tempvoiceCommand);
+
 module.exports = { commands, handleButton };

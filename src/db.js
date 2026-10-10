@@ -30,6 +30,19 @@ db.exec(`
     updated_at INTEGER NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS tempvoice_settings (
+    guild_id           TEXT PRIMARY KEY,
+    trigger_channel_id TEXT NOT NULL,
+    category_id        TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS tempvoice_channels (
+    channel_id TEXT PRIMARY KEY,
+    guild_id   TEXT NOT NULL,
+    owner_id   TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS afk_channels (
     guild_id   TEXT PRIMARY KEY,
     channel_id TEXT NOT NULL
