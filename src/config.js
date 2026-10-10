@@ -26,5 +26,6 @@ module.exports = {
     max: num(process.env.XP_MAX, 25),
     cooldownMs: num(process.env.XP_COOLDOWN_SECONDS, 60) * 1000,
     voicePerMinute: num(process.env.VOICE_XP, 0), // 0 = XP dari voice dimatikan
+    voiceMinUsers: num(process.env.VOICE_MIN_USERS, 2), // minimal user (bukan bot) di channel agar dapat XP; 1 = boleh sendirian
   },
 };

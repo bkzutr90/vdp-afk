@@ -1,4 +1,4 @@
-// XP dari voice: tiap menit, user yang tidak deafen dan berada di channel dengan minimal 2 orang (bukan bot) dapat XP.
+// XP dari voice: tiap menit, user yang tidak deafen dan berada di channel dengan minimal VOICE_MIN_USERS orang (bukan bot) dapat XP.
 const cfg = require('./config');
 const { addXp } = require('./xp');
 
@@ -17,13 +17,13 @@ function startVoiceXp(client) {
         byChannel.get(vs.channelId).push({ id: vs.id, deaf: vs.selfDeaf || vs.serverDeaf });
       }
       for (const humans of byChannel.values()) {
-        if (humans.length < 2) continue;
+        if (humans.length < cfg.xp.voiceMinUsers) continue;
         for (const h of humans) if (!h.deaf) addXp(guild.id, h.id, perMinute, false);
       }
     }
   }, 60_000).unref();
 
-  console.log(`[voicexp] aktif: ${perMinute} XP/menit`);
+  console.log(`[voicexp] aktif: ${perMinute} XP/menit, minimal ${cfg.xp.voiceMinUsers} user di channel`);
 }
 
 module.exports = { startVoiceXp };
