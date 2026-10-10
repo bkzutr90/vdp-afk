@@ -12,6 +12,9 @@ module.exports = {
   // Voice AFK 24 jam (opsional: bisa juga diatur lewat /afk join)
   afkChannelId: process.env.VOICE_CHANNEL_ID || null,
 
+  // Channel untuk notifikasi status bot AFK (terputus / masuk lagi / gagal). Kosong = tanpa notifikasi.
+  logChannelId: process.env.LOG_CHANNEL_ID || null,
+
   // Channel untuk laporan background (/background report)
   reportChannelId: process.env.REPORT_CHANNEL_ID || null,
 
