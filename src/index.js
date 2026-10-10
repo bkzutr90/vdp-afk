@@ -5,7 +5,7 @@ const { addXp } = require('./xp');
 const { announceLevelUp } = require('./levelup');
 const { startAfk } = require('./voice');
 const { startVoiceXp } = require('./voicexp');
-const { startTempVoice } = require('./tempvoice');
+const { startTempVoice, handleTempVoiceInteraction } = require('./tempvoice');
 
 if (!cfg.token) {
   console.error('DISCORD_TOKEN wajib diisi (Variables di Railway / .env)');
@@ -61,6 +61,11 @@ client.on('interactionCreate', async (i) => {
     if (i.isChatInputCommand()) {
       const cmd = commands.get(i.commandName);
       if (cmd) await cmd.execute(i, client);
+      return;
+    }
+    // Panel voice sementara: tombol, modal, dan menu pilih (customId diawali "tv:")
+    if ((i.isButton() || i.isModalSubmit() || i.isStringSelectMenu()) && i.customId.startsWith('tv:')) {
+      await handleTempVoiceInteraction(i);
       return;
     }
     if (i.isButton() && (await handleButton(i))) return;
