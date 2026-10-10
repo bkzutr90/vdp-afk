@@ -49,4 +49,13 @@ db.exec(`
   );
 `);
 
+// Migrasi: kolom panel pusat untuk voice sementara (aman dijalankan berulang)
+for (const col of ['panel_channel_id TEXT', 'panel_message_id TEXT']) {
+  try {
+    db.exec(`ALTER TABLE tempvoice_settings ADD COLUMN ${col}`);
+  } catch {
+    // kolom sudah ada
+  }
+}
+
 module.exports = { db };
