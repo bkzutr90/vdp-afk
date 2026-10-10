@@ -12,6 +12,7 @@ const {
   TextInputStyle,
   StringSelectMenuBuilder,
   ChannelType,
+  OverwriteType,
   PermissionFlagsBits,
   MessageFlags,
 } = require('discord.js');
@@ -21,6 +22,54 @@ const cfg = require('./config');
 const EPHEMERAL = MessageFlags.Ephemeral;
 const NO_PING = { parse: [] };
 const OWNER_PERMS = { ViewChannel: true, Connect: true, Speak: true, ManageChannels: true, MoveMembers: true };
+// Izin bot sendiri di setiap voice sementara. Tanpa ini, kategori yang membatasi "View Channel" membuat bot tidak bisa mengelola channel buatannya (error 50001).
+const BOT_PERMS = { ViewChannel: true, Connect: true, ManageChannels: true, MoveMembers: true };
+const bitsOf = (perms) => Object.keys(perms).filter((k) => perms[k]).reduce((a, k) => a | PermissionFlagsBits[k], 0n);
+
+// Salin izin kategori + izin eksplisit untuk bot dan pemilik (allow menang atas deny di entri yang sama)
+function buildOverwrites(guild, parent, ownerId) {
+  const map = new Map();
+  if (parent?.permissionOverwrites?.cache) {
+    for (const o of parent.permissionOverwrites.cache.values()) {
+      map.set(o.id, { id: o.id, type: o.type, allow: BigInt(o.allow.bitfield), deny: BigInt(o.deny.bitfield) });
+    }
+  }
+  const grant = (id, perms) => {
+    const cur = map.get(id) || { id, type: OverwriteType.Member, allow: 0n, deny: 0n };
+    const bits = bitsOf(perms);
+    cur.allow |= bits;
+    cur.deny &= ~bits;
+    map.set(id, cur);
+  };
+  grant(guild.members.me?.id || guild.client.user.id, BOT_PERMS);
+  grant(ownerId, OWNER_PERMS);
+  return [...map.values()];
+}
+
+// Ubah error izin Discord menjadi pesan yang bisa ditindaklanjuti
+function humanizeError(err) {
+  if (err?.code === 50001) {
+    return '❌ Bot tidak punya akses ke channel ini. Beri role bot izin **View Channel** dan **Manage Channels** di kategori voice sementara (atau jadikan role bot Administrator), lalu buat voice baru.';
+  }
+  if (err?.code === 50013) {
+    return '❌ Bot kurang izin. Pastikan role bot punya **Manage Channels**, **Manage Roles**, dan **Move Members**.';
+  }
+  return null;
+}
+
+async function guarded(i, fn) {
+  try {
+    await fn();
+  } catch (err) {
+    const msg = humanizeError(err);
+    if (!msg) throw err;
+    console.warn(`[tempvoice] izin kurang (${err.code}) saat ${i.customId || i.commandName}: ${err.message}`);
+    const payload = { content: msg, components: [], embeds: [] };
+    if (i.deferred || i.replied) await i.editReply(payload).catch(() => {});
+    else await i.reply({ ...payload, flags: EPHEMERAL }).catch(() => {});
+  }
+}
+
 const TRIGGER_NAME = '➕ Buat Temp Voice';
 const PANEL_CHANNEL_NAME = '🎛️-temp-voice';
 const CREATE_COOLDOWN_MS = 5_000;
@@ -316,15 +365,23 @@ async function handleJoinTrigger(member) {
     const parentId = settings.category_id || trigger?.parentId || null;
     const name = (cfg.tempVoiceName.replace('{user}', member.displayName).trim() || `Voice ${member.displayName}`).slice(0, 100);
 
-    const ch = await guild.channels.create({
+    const parent = parentId ? guild.channels.cache.get(parentId) : null;
+    const base = {
       name,
       type: ChannelType.GuildVoice,
       parent: parentId,
       userLimit: trigger?.userLimit || 0,
       reason: `Voice sementara untuk ${member.user.tag}`,
-    });
+    };
+    let ch;
+    try {
+      ch = await guild.channels.create({ ...base, permissionOverwrites: buildOverwrites(guild, parent, member.id) });
+    } catch (err) {
+      console.warn('[tempvoice] buat channel dengan izin eksplisit gagal, coba cara biasa:', err.message);
+      ch = await guild.channels.create(base);
+      await ch.permissionOverwrites.edit(member.id, OWNER_PERMS).catch((e) => console.warn('[tempvoice] gagal set izin pemilik:', e.message));
+    }
     addTemp(ch.id, guild.id, member.id);
-    await ch.permissionOverwrites.edit(member.id, OWNER_PERMS).catch((err) => console.warn('[tempvoice] gagal set izin pemilik:', err.message));
 
     try {
       await member.voice.setChannel(ch);
@@ -460,7 +517,7 @@ const command = {
 
       // ---- setup
       const me = i.guild.members.me;
-      const missing = ['ManageChannels', 'MoveMembers'].filter((p) => !me.permissions.has(PermissionFlagsBits[p]));
+      const missing = ['ManageChannels', 'ManageRoles', 'MoveMembers'].filter((p) => !me.permissions.has(PermissionFlagsBits[p]));
       if (missing.length) return i.reply({ content: `❌ Bot butuh izin: **${missing.join(', ')}**. Beri izin itu ke role bot lalu coba lagi.`, flags: EPHEMERAL });
 
       await i.deferReply({ flags: EPHEMERAL });
@@ -564,4 +621,7 @@ const command = {
   },
 };
 
-module.exports = { command, startTempVoice, handleTempVoiceInteraction };
+const rawExecute = command.execute;
+command.execute = (i) => guarded(i, () => rawExecute(i));
+
+module.exports = { command, startTempVoice, handleTempVoiceInteraction: (i) => guarded(i, () => handleTempVoiceInteraction(i)) };
