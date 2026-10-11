@@ -23,7 +23,7 @@ const EPHEMERAL = MessageFlags.Ephemeral;
 const NO_PING = { parse: [] };
 const OWNER_PERMS = { ViewChannel: true, Connect: true, Speak: true, ManageChannels: true, MoveMembers: true };
 // Izin bot sendiri di setiap voice sementara. Tanpa ini, kategori yang membatasi "View Channel" membuat bot tidak bisa mengelola channel buatannya (error 50001).
-const BOT_PERMS = { ViewChannel: true, Connect: true, ManageChannels: true, MoveMembers: true };
+const BOT_PERMS = { ViewChannel: true, Connect: true, ManageChannels: true, MoveMembers: true, SendMessages: true, EmbedLinks: true };
 const bitsOf = (perms) => Object.keys(perms).filter((k) => perms[k]).reduce((a, k) => a | PermissionFlagsBits[k], 0n);
 
 // Salin izin kategori + izin eksplisit untuk bot dan pemilik (allow menang atas deny di entri yang sama)
@@ -102,6 +102,12 @@ const listTemp = () => db.prepare('SELECT channel_id, guild_id, created_at FROM 
 const humansIn = (guild, channelId) =>
   [...guild.voiceStates.cache.values()].filter((s) => s.channelId === channelId && !s.member?.user?.bot);
 
+const CLAIM_GRACE_MS = 30_000; // pemilik harus sudah keluar minimal 30 detik sebelum bisa di-claim
+const REQUEST_COOLDOWN_MS = 60_000;
+const ownerAbsent = new Map(); // channelId -> waktu pemilik keluar
+const requestCooldown = new Map(); // "channelId:userId" -> waktu permintaan terakhir
+const isLocked = (guild, ch) => ch.permissionOverwrites.cache.get(guild.id)?.deny.has(PermissionFlagsBits.Connect) ?? false;
+
 const creating = new Set();
 const lastCreate = new Map();
 const renameLog = new Map(); // channelId -> [timestamp]
@@ -127,6 +133,7 @@ async function deleteIfEmpty(guild, channelId, { force = false } = {}) {
   if (!ch) return delTemp(channelId);
   if (!force && humansIn(guild, channelId).length > 0) return;
   delTemp(channelId);
+  ownerAbsent.delete(channelId);
   await ch.delete('Voice sementara kosong').catch((err) => console.warn('[tempvoice] gagal hapus channel:', err.message));
 }
 
@@ -168,7 +175,9 @@ const panelEmbed = (triggerId) =>
         '👥 **Batas Orang** — atur jumlah maksimal\n' +
         '✏️ **Ganti Nama** — ubah nama channel\n' +
         '👑 **Serahkan** — pindahkan kepemilikan\n' +
-        'ℹ️ **Info** — lihat status voice kamu',
+        'ℹ️ **Info** — lihat status voice kamu\n' +
+        '🚪 **Minta Masuk** — minta izin masuk ke voice yang dikunci\n' +
+        '🙋 **Ambil Alih** — ambil alih voice kalau pemilik sudah keluar',
     });
 
 const panelRows = () => [
@@ -179,7 +188,11 @@ const panelRows = () => [
     new ButtonBuilder().setCustomId('tv:rename').setLabel('Ganti Nama').setEmoji('✏️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('tv:transfer').setLabel('Serahkan').setEmoji('👑').setStyle(ButtonStyle.Primary)
   ),
-  new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('tv:info').setLabel('Info').setEmoji('ℹ️').setStyle(ButtonStyle.Secondary)),
+  new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('tv:info').setLabel('Info').setEmoji('ℹ️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('tv:request').setLabel('Minta Masuk').setEmoji('🚪').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('tv:claim').setLabel('Ambil Alih').setEmoji('🙋').setStyle(ButtonStyle.Secondary)
+  ),
 ];
 
 async function fetchTextChannel(guild, id) {
@@ -223,7 +236,111 @@ async function ensurePanels(client) {
     }
     const msg = s.panel_message_id && (await ch.messages.fetch(s.panel_message_id).catch(() => null));
     if (!msg) await sendCentralPanel(guild);
+    else await msg.edit({ embeds: [panelEmbed(s.trigger_channel_id)], components: panelRows() }).catch(() => {});
   }
+}
+
+// ---- Minta masuk ke voice yang dikunci
+async function showRequestMenu(i) {
+  const guild = i.guild;
+  const myChannelId = guild.voiceStates.cache.get(i.user.id)?.channelId;
+  const options = [];
+  for (const r of listTemp()) {
+    if (r.guild_id !== guild.id || r.channel_id === myChannelId) continue;
+    const ch = guild.channels.cache.get(r.channel_id);
+    const row = ch && getTemp(r.channel_id);
+    if (!ch || !row || row.owner_id === i.user.id || !isLocked(guild, ch)) continue;
+    const ownerName = guild.voiceStates.cache.get(row.owner_id)?.member?.displayName || 'pemilik';
+    options.push({ label: ch.name.slice(0, 100), description: `Pemilik: ${ownerName}`.slice(0, 100), value: ch.id });
+    if (options.length >= 25) break;
+  }
+  if (!options.length) {
+    return i.reply({ content: 'Tidak ada voice sementara yang sedang dikunci. Kalau channelnya terbuka, langsung masuk saja.', flags: EPHEMERAL });
+  }
+  const menu = new StringSelectMenuBuilder().setCustomId('tv:reqsel').setPlaceholder('Pilih voice yang ingin kamu masuki').addOptions(options);
+  return i.reply({ content: 'Pilih voice yang ingin kamu masuki. Permintaanmu dikirim ke pemiliknya:', components: [new ActionRowBuilder().addComponents(menu)], flags: EPHEMERAL });
+}
+
+async function sendRequest(i) {
+  await i.deferUpdate();
+  const guild = i.guild;
+  const chId = i.values[0];
+  const row = getTemp(chId);
+  const ch = guild.channels.cache.get(chId);
+  const done = (content) => i.editReply({ content, components: [] });
+
+  if (!row || !ch) return done('❌ Voice itu sudah tidak ada.');
+  if (row.owner_id === i.user.id) return done('❌ Itu channel milikmu sendiri.');
+  if (guild.voiceStates.cache.get(i.user.id)?.channelId === chId) return done('❌ Kamu sudah berada di channel itu.');
+  if (!isLocked(guild, ch)) return done(`🔓 <#${chId}> sedang terbuka. Langsung masuk saja.`);
+
+  const key = `${chId}:${i.user.id}`;
+  if (Date.now() - (requestCooldown.get(key) || 0) < REQUEST_COOLDOWN_MS) return done('⏳ Kamu baru saja meminta masuk ke channel itu. Tunggu sebentar.');
+
+  const embed = new EmbedBuilder()
+    .setColor(0xf1c40f)
+    .setTitle('🚪 Permintaan masuk')
+    .setDescription(`${i.user} ingin masuk ke <#${chId}>.`)
+    .setFooter({ text: 'Hanya pemilik yang bisa menjawab' });
+  const buttons = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`tv:ra:${chId}:${i.user.id}`).setLabel('Setujui').setEmoji('✅').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`tv:rd:${chId}:${i.user.id}`).setLabel('Tolak').setEmoji('❌').setStyle(ButtonStyle.Danger)
+  );
+  try {
+    await ch.send({ content: `<@${row.owner_id}>`, embeds: [embed], components: [buttons], allowedMentions: { users: [row.owner_id] } });
+  } catch (err) {
+    console.warn('[tempvoice] gagal kirim permintaan masuk (cek izin Send Messages bot di channel itu):', err.message);
+    return done('❌ Tidak bisa mengirim permintaan ke channel itu. Hubungi pemiliknya langsung.');
+  }
+  requestCooldown.set(key, Date.now());
+  return done(`✅ Permintaan dikirim ke pemilik <#${chId}>. Kamu akan di-mention di chat channel itu setelah dijawab.`);
+}
+
+async function answerRequest(i, action) {
+  const [, , chId, userId] = i.customId.split(':');
+  const row = getTemp(chId);
+  const ch = i.guild.channels.cache.get(chId);
+  if (!row || !ch) return i.reply({ content: '❌ Voice ini sudah tidak ada.', flags: EPHEMERAL });
+  if (row.owner_id !== i.user.id) {
+    return i.reply({ content: `❌ Hanya pemilik (<@${row.owner_id}>) yang bisa menjawab permintaan ini.`, flags: EPHEMERAL, allowedMentions: NO_PING });
+  }
+  await i.deferUpdate();
+  const approve = action === 'ra';
+  if (approve) await ch.permissionOverwrites.edit(userId, { ViewChannel: true, Connect: true });
+  const embed = new EmbedBuilder()
+    .setColor(approve ? 0x2ecc71 : 0xe74c3c)
+    .setTitle(approve ? '✅ Permintaan disetujui' : '❌ Permintaan ditolak')
+    .setDescription(`<@${userId}> ${approve ? 'boleh masuk' : 'tidak diizinkan masuk'} (oleh ${i.user}).`);
+  await i.editReply({ content: '', embeds: [embed], components: [], allowedMentions: NO_PING });
+  // Pesan baru supaya peminta benar-benar mendapat notifikasi (edit pesan tidak mem-ping)
+  ch.send({
+    content: approve ? `✅ <@${userId}>, kamu boleh masuk ke <#${chId}> sekarang.` : `❌ <@${userId}>, permintaanmu ditolak pemilik.`,
+    allowedMentions: { users: [userId] },
+  }).catch(() => {});
+}
+
+// ---- Ambil alih voice kalau pemilik sudah keluar
+async function claimChannel(i) {
+  const guild = i.guild;
+  const chId = guild.voiceStates.cache.get(i.user.id)?.channelId;
+  const row = chId && getTemp(chId);
+  const ch = chId && guild.channels.cache.get(chId);
+  if (!row || !ch) return i.reply({ content: '❌ Kamu harus berada di voice sementara yang ingin diambil alih.', flags: EPHEMERAL });
+  if (row.owner_id === i.user.id) return i.reply({ content: '❌ Kamu sudah menjadi pemilik channel ini.', flags: EPHEMERAL });
+
+  const ownerHere = [...guild.voiceStates.cache.values()].some((s) => s.id === row.owner_id && s.channelId === chId);
+  if (ownerHere) return i.reply({ content: `❌ Pemilik (<@${row.owner_id}>) masih berada di channel ini.`, flags: EPHEMERAL, allowedMentions: NO_PING });
+
+  const since = ownerAbsent.get(chId);
+  if (since && Date.now() - since < CLAIM_GRACE_MS) {
+    const wait = Math.ceil((CLAIM_GRACE_MS - (Date.now() - since)) / 1000);
+    return i.reply({ content: `⏳ Pemilik baru saja keluar. Tunggu ${wait} detik lagi (siapa tahu ia hanya terputus sebentar).`, flags: EPHEMERAL });
+  }
+
+  await i.deferReply({ flags: EPHEMERAL });
+  await transferOwner(ch, row.owner_id, i.member, true);
+  ownerAbsent.delete(chId);
+  return i.editReply(`👑 Kamu sekarang pemilik <#${chId}>.`);
 }
 
 // Interaksi panel: tombol, modal, dan menu pilih. customId: tv:<aksi>
@@ -231,6 +348,12 @@ async function handleTempVoiceInteraction(i) {
   const action = i.customId.split(':')[1];
   const guild = i.guild;
   if (!guild) return;
+
+  // Aksi yang boleh dipakai siapa saja (tidak perlu punya voice sendiri)
+  if (action === 'request' && i.isButton()) return showRequestMenu(i);
+  if (action === 'reqsel' && i.isStringSelectMenu()) return sendRequest(i);
+  if ((action === 'ra' || action === 'rd') && i.isButton()) return answerRequest(i, action);
+  if (action === 'claim' && i.isButton()) return claimChannel(i);
 
   const ch = ownedByUser(guild, i.user.id);
   if (!ch) {
@@ -407,9 +530,13 @@ async function handleLeave(guild, channelId, userId) {
 
   // Pemilik keluar tapi masih ada orang -> oper kepemilikan (utamakan yang belum punya voice sementara)
   if (row.owner_id === userId) {
+    ownerAbsent.set(channelId, Date.now());
     const known = humans.filter((s) => s.member && !s.member.user.bot);
     const next = known.find((s) => !getTempsByOwner(guild.id, s.id).length) || known[0];
-    if (next) await transferOwner(ch, userId, next.member, true);
+    if (next) {
+      await transferOwner(ch, userId, next.member, true);
+      ownerAbsent.delete(channelId);
+    }
   }
 }
 
@@ -427,6 +554,7 @@ function startTempVoice(client) {
   client.on('voiceStateUpdate', async (oldS, newS) => {
     try {
       if (newS.channelId && newS.channelId !== oldS.channelId) {
+        if (getTemp(newS.channelId)?.owner_id === newS.id) ownerAbsent.delete(newS.channelId); // pemilik kembali
         const settings = getSettings(newS.guild.id);
         const member = newS.member;
         if (settings && member && !member.user.bot && newS.channelId === settings.trigger_channel_id) await handleJoinTrigger(member);
@@ -484,6 +612,7 @@ const command = {
         .setDescription('Batasi jumlah orang (0 = tanpa batas)')
         .addIntegerOption((o) => o.setName('jumlah').setDescription('0 - 99').setMinValue(0).setMaxValue(99).setRequired(true))
     )
+    .addSubcommand((s) => s.setName('claim').setDescription('Ambil alih voice sementara yang pemiliknya sudah keluar'))
     .addSubcommand((s) => s.setName('lock').setDescription('Kunci channel: orang lain tidak bisa masuk'))
     .addSubcommand((s) => s.setName('unlock').setDescription('Buka kunci channel'))
     .addSubcommand((s) =>
@@ -573,6 +702,8 @@ const command = {
           `• Kategori voice sementara: ${category ? `**${category.name}**` : 'sama dengan channel pemicu'}`
       );
     }
+
+    if (sub === 'claim') return claimChannel(i);
 
     // ---- pemilik channel
     const vc = ownedByUser(i.guild, i.user.id);
