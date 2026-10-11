@@ -29,6 +29,17 @@ const CATEGORY_IDS = (
 // Role lain yang tetap boleh melihat channel (staff dll), opsional. Pisahkan dengan koma.
 const KEEP_ROLE_IDS = (process.env.SELFROLE_KEEP_ROLE_IDS || '').split(',').map((s) => s.trim()).filter(Boolean);
 
+// Role (mis. Manager) yang boleh menjalankan /selfrole selain yang punya izin Manage Roles/Channels/Server. Pisahkan dengan koma.
+const MANAGER_ROLE_IDS = (process.env.SELFROLE_MANAGER_ROLE_IDS || '').split(',').map((s) => s.trim()).filter(Boolean);
+
+function canManage(i) {
+  if (i.guild.ownerId === i.user.id) return true;
+  const p = i.memberPermissions;
+  if (p?.has(PermissionFlagsBits.Administrator)) return true;
+  if (p?.has(PermissionFlagsBits.ManageRoles) || p?.has(PermissionFlagsBits.ManageChannels) || p?.has(PermissionFlagsBits.ManageGuild)) return true;
+  return MANAGER_ROLE_IDS.some((id) => i.member?.roles?.cache?.has(id));
+}
+
 const findRole = (guild, key) => guild.roles.cache.find((r) => r.name.toLowerCase() === ROLES[key].name.toLowerCase());
 
 async function ensureRole(guild, key) {
@@ -111,10 +122,12 @@ const command = {
   data: new SlashCommandBuilder()
     .setName('selfrole')
     .setDescription('Setup role Boy/Girl & channel terkunci')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addSubcommand((s) => s.setName('setup').setDescription('Buat role, kunci kategori, dan kirim panel ke #ambil-roles'))
     .addSubcommand((s) => s.setName('panel').setDescription('Kirim ulang panel ambil role saja')),
   async execute(i) {
+    if (!canManage(i)) {
+      return i.reply({ content: '❌ Kamu tidak punya izin untuk memakai command ini.', flags: EPHEMERAL });
+    }
     await i.deferReply({ flags: EPHEMERAL });
     const guild = i.guild;
     const sub = i.options.getSubcommand();
