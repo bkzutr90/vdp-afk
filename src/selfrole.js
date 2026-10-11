@@ -5,9 +5,14 @@ const {
   ButtonBuilder,
   ButtonStyle,
   MessageFlags,
+  ModalBuilder,
   PermissionFlagsBits,
+  TextInputBuilder,
+  TextInputStyle,
 } = require('discord.js');
+const crypto = require('crypto');
 const cfg = require('./config');
+const { db } = require('./db');
 
 const EPHEMERAL = MessageFlags.Ephemeral;
 
@@ -38,6 +43,98 @@ function canManage(i) {
   if (p?.has(PermissionFlagsBits.Administrator)) return true;
   if (p?.has(PermissionFlagsBits.ManageRoles) || p?.has(PermissionFlagsBits.ManageChannels) || p?.has(PermissionFlagsBits.ManageGuild)) return true;
   return MANAGER_ROLE_IDS.some((id) => i.member?.roles?.cache?.has(id));
+}
+
+// ------------------------------------------------------------------ verifikasi (captcha sederhana)
+const VERIFY_ON = process.env.SELFROLE_VERIFY !== '0'; // 0 = matikan verifikasi
+const MIN_ACCOUNT_DAYS = Number(process.env.VERIFY_MIN_ACCOUNT_DAYS) || 0; // umur akun minimal (hari), 0 = bebas
+const CODE_TTL = 3 * 60_000;
+const MAX_TRIES = 3;
+const LOCK_MS = 2 * 60_000;
+const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // tanpa O/0/I/1 supaya tidak membingungkan
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS selfrole_verified (
+    guild_id    TEXT NOT NULL,
+    user_id     TEXT NOT NULL,
+    verified_at INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, user_id)
+  );
+`);
+const isVerified = (guildId, userId) => !!db.prepare('SELECT 1 FROM selfrole_verified WHERE guild_id=? AND user_id=?').get(guildId, userId);
+const markVerified = (guildId, userId) =>
+  db.prepare('INSERT OR REPLACE INTO selfrole_verified (guild_id, user_id, verified_at) VALUES (?, ?, ?)').run(guildId, userId, Date.now());
+
+const pending = new Map(); // "guild:user" -> { code, expires, tries }
+const locked = new Map(); // "guild:user" -> timestamp sampai kapan diblokir
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of pending) if (v.expires < now) pending.delete(k);
+  for (const [k, t] of locked) if (t < now) locked.delete(k);
+}, 5 * 60_000).unref();
+
+async function startVerify(i) {
+  const key = `${i.guildId}:${i.user.id}`;
+  if (isVerified(i.guildId, i.user.id)) {
+    return i.reply({ content: '✅ Kamu sudah terverifikasi. Silakan pilih **Boy** atau **Girl**.', flags: EPHEMERAL });
+  }
+  const ageDays = (Date.now() - i.user.createdTimestamp) / 86_400_000;
+  if (MIN_ACCOUNT_DAYS && ageDays < MIN_ACCOUNT_DAYS) {
+    return i.reply({ content: `❌ Akun kamu masih terlalu baru. Coba lagi dalam ${Math.ceil(MIN_ACCOUNT_DAYS - ageDays)} hari.`, flags: EPHEMERAL });
+  }
+  const until = locked.get(key) || 0;
+  if (until > Date.now()) {
+    return i.reply({ content: `⏳ Terlalu banyak salah. Coba lagi dalam ${Math.ceil((until - Date.now()) / 1000)} detik.`, flags: EPHEMERAL });
+  }
+
+  const code = Array.from({ length: 5 }, () => CODE_CHARS[crypto.randomInt(CODE_CHARS.length)]).join('');
+  pending.set(key, { code, expires: Date.now() + CODE_TTL, tries: 0 });
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('vf:enter').setLabel('Masukkan kode').setEmoji('⌨️').setStyle(ButtonStyle.Success)
+  );
+  return i.reply({
+    content: `🔐 **Kode verifikasi kamu:**\n\`\`\`\n${code.split('').join(' ')}\n\`\`\`\nKlik tombol di bawah, lalu ketik kodenya (berlaku 3 menit).`,
+    components: [row],
+    flags: EPHEMERAL,
+  });
+}
+
+async function showCodeModal(i) {
+  const p = pending.get(`${i.guildId}:${i.user.id}`);
+  if (!p || p.expires < Date.now()) {
+    return i.reply({ content: '⌛ Kode kedaluwarsa. Klik **Verifikasi** di panel untuk kode baru.', flags: EPHEMERAL });
+  }
+  const modal = new ModalBuilder()
+    .setCustomId('vf:modal')
+    .setTitle('Verifikasi')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('code').setLabel('Ketik kode yang kamu terima').setStyle(TextInputStyle.Short).setMinLength(3).setMaxLength(12).setRequired(true)
+      )
+    );
+  return i.showModal(modal);
+}
+
+async function checkCode(i) {
+  const key = `${i.guildId}:${i.user.id}`;
+  const p = pending.get(key);
+  if (!p || p.expires < Date.now()) {
+    pending.delete(key);
+    return i.reply({ content: '⌛ Kode kedaluwarsa. Klik **Verifikasi** di panel untuk kode baru.', flags: EPHEMERAL });
+  }
+  const input = i.fields.getTextInputValue('code').replace(/\s+/g, '').toUpperCase();
+  if (input === p.code) {
+    pending.delete(key);
+    markVerified(i.guildId, i.user.id);
+    return i.reply({ content: '✅ Verifikasi berhasil! Sekarang pilih **Boy** atau **Girl** di panel untuk membuka channel.', flags: EPHEMERAL });
+  }
+  p.tries++;
+  if (p.tries >= MAX_TRIES) {
+    pending.delete(key);
+    locked.set(key, Date.now() + LOCK_MS);
+    return i.reply({ content: '❌ Salah 3 kali. Coba lagi dalam 2 menit.', flags: EPHEMERAL });
+  }
+  return i.reply({ content: `❌ Kode salah. Sisa percobaan: **${MAX_TRIES - p.tries}**. Klik **Masukkan kode** lagi.`, flags: EPHEMERAL });
 }
 
 const findRole = (guild, key) => guild.roles.cache.find((r) => r.name.toLowerCase() === ROLES[key].name.toLowerCase());
@@ -116,11 +213,13 @@ function panelPayload() {
     .setColor(cfg.accent)
     .setTitle('🎭 Ambil Role')
     .setDescription(
-      'Pilih salah satu role di bawah untuk membuka semua channel server.\n\n' +
+      (VERIFY_ON ? '**1.** Klik **Verifikasi** dan masukkan kode yang muncul.\n**2.** Pilih role di bawah untuk membuka semua channel server.\n\n' : 'Pilih salah satu role di bawah untuk membuka semua channel server.\n\n') +
         `${ROLES.boy.emoji} **Boy**\n${ROLES.girl.emoji} **Girl**\n\n` +
-        'Klik tombol lagi untuk melepas role. Memilih satu role otomatis mengganti role lainnya.'
+        'Klik tombol role lagi untuk melepasnya. Memilih satu role otomatis mengganti role lainnya.'
     );
-  const row = new ActionRowBuilder().addComponents(
+  const row = new ActionRowBuilder();
+  if (VERIFY_ON) row.addComponents(new ButtonBuilder().setCustomId('vf:start').setLabel('Verifikasi').setEmoji('✅').setStyle(ButtonStyle.Success));
+  row.addComponents(
     new ButtonBuilder().setCustomId('sr:boy').setLabel('Boy').setEmoji(ROLES.boy.emoji).setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('sr:girl').setLabel('Girl').setEmoji(ROLES.girl.emoji).setStyle(ButtonStyle.Danger)
   );
@@ -167,7 +266,21 @@ const command = {
   },
 };
 
-async function handleSelfRoleButton(i) {
+async function handleSelfRoleInteraction(i) {
+  if (i.isModalSubmit()) {
+    if (i.customId !== 'vf:modal') return false;
+    await checkCode(i);
+    return true;
+  }
+  if (!i.isButton()) return false;
+  if (i.customId === 'vf:start') {
+    await startVerify(i);
+    return true;
+  }
+  if (i.customId === 'vf:enter') {
+    await showCodeModal(i);
+    return true;
+  }
   if (!i.customId.startsWith('sr:')) return false;
   const key = i.customId.slice(3);
   if (!ROLES[key]) return true;
@@ -183,6 +296,13 @@ async function handleSelfRoleButton(i) {
   const member = await i.guild.members.fetch(i.user.id).catch(() => null);
   if (!member) {
     await i.reply({ content: '❌ Gagal mengambil data kamu.', flags: EPHEMERAL });
+    return true;
+  }
+
+  // Mengambil role pertama kali wajib verifikasi (yang sudah punya Boy/Girl dianggap terverifikasi)
+  const already = member.roles.cache.has(role.id) || (otherRole && member.roles.cache.has(otherRole.id));
+  if (VERIFY_ON && !already && !isVerified(i.guildId, i.user.id)) {
+    await i.reply({ content: '🔐 Verifikasi dulu: klik tombol **✅ Verifikasi** di panel, lalu masukkan kodenya.', flags: EPHEMERAL });
     return true;
   }
 
@@ -202,4 +322,4 @@ async function handleSelfRoleButton(i) {
   return true;
 }
 
-module.exports = { command, handleSelfRoleButton };
+module.exports = { command, handleSelfRoleInteraction, handleSelfRoleButton: handleSelfRoleInteraction };
