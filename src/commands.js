@@ -308,4 +308,8 @@ def(
 const { command: tempvoiceCommand } = require('./tempvoice');
 commands.set(tempvoiceCommand.data.name, tempvoiceCommand);
 
+// ------------------------------------------------------------------ /selfrole (role Boy/Girl)
+const { command: selfroleCommand } = require('./selfrole');
+commands.set(selfroleCommand.data.name, selfroleCommand);
+
 module.exports = { commands, handleButton };

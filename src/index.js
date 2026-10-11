@@ -6,6 +6,7 @@ const { announceLevelUp } = require('./levelup');
 const { startAfk } = require('./voice');
 const { startVoiceXp } = require('./voicexp');
 const { startTempVoice, handleTempVoiceInteraction } = require('./tempvoice');
+const { handleSelfRoleButton } = require('./selfrole');
 
 if (!cfg.token) {
   console.error('DISCORD_TOKEN wajib diisi (Variables di Railway / .env)');
@@ -68,6 +69,8 @@ client.on('interactionCreate', async (i) => {
       await handleTempVoiceInteraction(i);
       return;
     }
+    // Tombol ambil role Boy/Girl (customId diawali "sr:")
+    if (i.isButton() && (await handleSelfRoleButton(i))) return;
     if (i.isButton() && (await handleButton(i))) return;
   } catch (err) {
     console.error('[interaction] error:', err);
