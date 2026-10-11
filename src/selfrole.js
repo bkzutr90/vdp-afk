@@ -47,7 +47,7 @@ async function ensureRole(guild, key) {
   if (!role) {
     role = await guild.roles.create({
       name: ROLES[key].name,
-      color: ROLES[key].color,
+      colors: { primaryColor: ROLES[key].color },
       reason: 'Self role setup',
     });
   }
@@ -78,8 +78,9 @@ async function setupPermissions(guild, boy, girl) {
       log.failed.push(`kategori ${catId} tidak ditemukan`);
       continue;
     }
-    await lock(cat);
-    for (const child of cat.children.cache.values()) {
+    if (cat.permissionOverwrites) await lock(cat);
+    const children = guild.channels.cache.filter((c) => c.parentId === catId && c.permissionOverwrites);
+    for (const child of children.values()) {
       if (publicIds.has(child.id)) continue;
       await lock(child);
     }
@@ -148,6 +149,7 @@ const command = {
       await pick.send(panelPayload());
       return i.editReply(`✅ Selesai. Panel dikirim ke ${pick}.\n${report}`.trim());
     } catch (err) {
+      console.error('[selfrole] error:', err);
       return i.editReply(`❌ Error: \`${String(err.message).slice(0, 300)}\`\nPastikan bot punya Manage Roles + Manage Channels dan role bot ada di atas Boy/Girl.`);
     }
   },
