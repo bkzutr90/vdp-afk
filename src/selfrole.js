@@ -59,11 +59,18 @@ async function setupPermissions(guild, boy, girl) {
   const publicIds = new Set([ANNOUNCEMENT_ID, PICK_CHANNEL_ID]);
   const log = { locked: 0, failed: [] };
 
+  const me = await guild.members.fetchMe();
+  const botTarget = me.roles.botRole || me;
+  const R = { reason: 'Self role setup' };
+
+  // Urutan penting: bot memberi izin ke DIRINYA dulu, baru menutup @everyone.
+  // Kalau terbalik, bot kehilangan akses lihat channel dan jadi "Missing Permissions".
   const lock = async (ch) => {
     try {
-      await ch.permissionOverwrites.edit(everyone, { ViewChannel: false }, { reason: 'Self role setup' });
-      for (const r of [boy, girl]) await ch.permissionOverwrites.edit(r, { ViewChannel: true }, { reason: 'Self role setup' });
-      for (const id of KEEP_ROLE_IDS) await ch.permissionOverwrites.edit(id, { ViewChannel: true }, { reason: 'Self role setup' });
+      await ch.permissionOverwrites.edit(botTarget, { ViewChannel: true, ManageChannels: true, ManageRoles: true }, R);
+      for (const r of [boy, girl]) await ch.permissionOverwrites.edit(r, { ViewChannel: true }, R);
+      for (const id of KEEP_ROLE_IDS) await ch.permissionOverwrites.edit(id, { ViewChannel: true }, R);
+      await ch.permissionOverwrites.edit(everyone, { ViewChannel: false }, R);
       log.locked++;
     } catch (err) {
       log.failed.push(`${ch.name} (${err.message})`);
@@ -94,8 +101,9 @@ async function setupPermissions(guild, boy, girl) {
       continue;
     }
     try {
+      await ch.permissionOverwrites.edit(botTarget, { ViewChannel: true, SendMessages: true, EmbedLinks: true }, R);
       const perms = { ViewChannel: true, SendMessages: false, AddReactions: false };
-      await ch.permissionOverwrites.edit(everyone, perms, { reason: 'Self role setup' });
+      await ch.permissionOverwrites.edit(everyone, perms, R);
     } catch (err) {
       log.failed.push(`${ch.name} (${err.message})`);
     }
@@ -132,25 +140,29 @@ const command = {
     await i.deferReply({ flags: EPHEMERAL });
     const guild = i.guild;
     const sub = i.options.getSubcommand();
+    let step = 'ambil data role';
     try {
       await guild.roles.fetch(); // pastikan cache role lengkap
+      step = 'membuat role Boy/Girl';
       const boy = await ensureRole(guild, 'boy');
       const girl = await ensureRole(guild, 'girl');
       let report = '';
 
       if (sub === 'setup') {
+        step = 'mengatur izin channel';
         const log = await setupPermissions(guild, boy, girl);
         report = `🔒 ${log.locked} kategori/channel dikunci untuk @everyone, dibuka untuk ${boy} & ${girl}.`;
         if (log.failed.length) report += `\n⚠️ Gagal:\n${log.failed.slice(0, 10).map((f) => `• ${f}`).join('\n')}`;
       }
 
+      step = 'mengirim panel ke ambil-roles';
       const pick = await guild.channels.fetch(PICK_CHANNEL_ID).catch(() => null);
       if (!pick?.isTextBased()) return i.editReply(`${report}\n❌ Channel ambil-roles tidak ditemukan.`);
       await pick.send(panelPayload());
       return i.editReply(`✅ Selesai. Panel dikirim ke ${pick}.\n${report}`.trim());
     } catch (err) {
       console.error('[selfrole] error:', err);
-      return i.editReply(`❌ Error: \`${String(err.message).slice(0, 300)}\`\nPastikan bot punya Manage Roles + Manage Channels dan role bot ada di atas Boy/Girl.`);
+      return i.editReply(`❌ Gagal saat **${step}**: \`${String(err.message).slice(0, 300)}\`\nPastikan bot punya Manage Roles + Manage Channels dan role bot ada di atas Boy/Girl.`);
     }
   },
 };
