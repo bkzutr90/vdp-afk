@@ -8,16 +8,18 @@ const { startVoiceXp } = require('./voicexp');
 const { startTempVoice, handleTempVoiceInteraction } = require('./tempvoice');
 const { handleSelfRoleInteraction } = require('./selfrole');
 const { startBirthday } = require('./birthday');
+const { startStats } = require('./stats');
+const { handleSiderInteraction } = require('./sider');
 
 if (!cfg.token) {
   console.error('DISCORD_TOKEN wajib diisi (Variables di Railway / .env)');
   process.exit(1);
 }
 
-// Tidak butuh intent privileged (Message Content / Server Members).
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages],
-});
+// Default tanpa intent privileged. Server Members hanya dipakai kalau STATS_USE_MEMBERS_INTENT=1.
+const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages];
+if (cfg.statsUseMembersIntent) intents.push(GatewayIntentBits.GuildMembers);
+const client = new Client({ intents });
 
 async function registerCommands(clientId) {
   try {
@@ -38,6 +40,7 @@ client.once('clientReady', async () => {
   startVoiceXp(client);
   startTempVoice(client);
   startBirthday(client);
+  startStats(client);
 });
 
 // ---- XP dari chat (dengan cooldown per user)
@@ -73,6 +76,8 @@ client.on('interactionCreate', async (i) => {
     }
     // Ambil role Boy/Girl + verifikasi (customId diawali "sr:" / "vf:", termasuk modal kode)
     if ((i.isButton() || i.isModalSubmit()) && (await handleSelfRoleInteraction(i))) return;
+    // Tombol "Sudah baca" untuk cek sider (customId "sd:read")
+    if (i.isButton() && (await handleSiderInteraction(i))) return;
     if (i.isButton() && (await handleButton(i))) return;
   } catch (err) {
     console.error('[interaction] error:', err);

@@ -316,4 +316,12 @@ commands.set(selfroleCommand.data.name, selfroleCommand);
 const { command: birthdayCommand } = require('./birthday');
 commands.set(birthdayCommand.data.name, birthdayCommand);
 
+// ------------------------------------------------------------------ /sider (cek siapa yang sudah baca)
+const { command: siderCommand } = require('./sider');
+commands.set(siderCommand.data.name, siderCommand);
+
+// ------------------------------------------------------------------ /serverstats
+const { command: statsCommand } = require('./stats');
+commands.set(statsCommand.data.name, statsCommand);
+
 module.exports = { commands, handleButton };

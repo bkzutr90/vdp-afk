@@ -26,6 +26,9 @@ module.exports = {
   // Zona waktu untuk menentukan "hari ini" (Jakarta = WIB)
   timezone: process.env.TZ_NAME || 'Asia/Jakarta',
 
+  // Server stats: 1 = hitung bot akurat lewat Server Members Intent (aktifkan juga di Developer Portal). 0 = tanpa intent privileged.
+  statsUseMembersIntent: process.env.STATS_USE_MEMBERS_INTENT === '1',
+
   // Pesan naik level
   levelUpMessages: process.env.LEVELUP_MESSAGES !== '0',
   levelUpChannelId: process.env.LEVELUP_CHANNEL_ID || null, // kosong = di channel tempat user chat
