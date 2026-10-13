@@ -21,6 +21,11 @@ module.exports = {
   // Channel untuk laporan background (/background report)
   reportChannelId: process.env.REPORT_CHANNEL_ID || null,
 
+  // Channel ucapan ulang tahun
+  birthdayChannelId: process.env.BIRTHDAY_CHANNEL_ID || '1558334187554086994',
+  // Zona waktu untuk menentukan "hari ini" (Jakarta = WIB)
+  timezone: process.env.TZ_NAME || 'Asia/Jakarta',
+
   // Pesan naik level
   levelUpMessages: process.env.LEVELUP_MESSAGES !== '0',
   levelUpChannelId: process.env.LEVELUP_CHANNEL_ID || null, // kosong = di channel tempat user chat

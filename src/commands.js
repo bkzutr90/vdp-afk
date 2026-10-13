@@ -312,4 +312,8 @@ commands.set(tempvoiceCommand.data.name, tempvoiceCommand);
 const { command: selfroleCommand } = require('./selfrole');
 commands.set(selfroleCommand.data.name, selfroleCommand);
 
+// ------------------------------------------------------------------ /birthday
+const { command: birthdayCommand } = require('./birthday');
+commands.set(birthdayCommand.data.name, birthdayCommand);
+
 module.exports = { commands, handleButton };

@@ -7,6 +7,7 @@ const { startAfk } = require('./voice');
 const { startVoiceXp } = require('./voicexp');
 const { startTempVoice, handleTempVoiceInteraction } = require('./tempvoice');
 const { handleSelfRoleInteraction } = require('./selfrole');
+const { startBirthday } = require('./birthday');
 
 if (!cfg.token) {
   console.error('DISCORD_TOKEN wajib diisi (Variables di Railway / .env)');
@@ -36,6 +37,7 @@ client.once('clientReady', async () => {
   startAfk(client).catch((err) => console.error('[afk] gagal start:', err));
   startVoiceXp(client);
   startTempVoice(client);
+  startBirthday(client);
 });
 
 // ---- XP dari chat (dengan cooldown per user)

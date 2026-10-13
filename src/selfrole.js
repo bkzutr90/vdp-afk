@@ -13,6 +13,7 @@ const {
 const crypto = require('crypto');
 const cfg = require('./config');
 const { db } = require('./db');
+const { birthdayInputRow, parseBirthday, saveBirthday } = require('./birthday');
 
 const EPHEMERAL = MessageFlags.Ephemeral;
 
@@ -45,7 +46,7 @@ function canManage(i) {
   return MANAGER_ROLE_IDS.some((id) => i.member?.roles?.cache?.has(id));
 }
 
-// ------------------------------------------------------------------ verifikasi (captcha sederhana)
+// ------------------------------------------------------------------ verifikasi (captcha sederhana + tanggal ulang tahun)
 const VERIFY_ON = process.env.SELFROLE_VERIFY !== '0'; // 0 = matikan verifikasi
 const MIN_ACCOUNT_DAYS = Number(process.env.VERIFY_MIN_ACCOUNT_DAYS) || 0; // umur akun minimal (hari), 0 = bebas
 const CODE_TTL = 3 * 60_000;
@@ -93,7 +94,7 @@ async function startVerify(i) {
     new ButtonBuilder().setCustomId('vf:enter').setLabel('Masukkan kode').setEmoji('⌨️').setStyle(ButtonStyle.Success)
   );
   return i.reply({
-    content: `🔐 **Kode verifikasi kamu:**\n\`\`\`\n${code.split('').join(' ')}\n\`\`\`\nKlik tombol di bawah, lalu ketik kodenya (berlaku 3 menit).`,
+    content: `🔐 **Kode verifikasi kamu:**\n\`\`\`\n${code.split('').join(' ')}\n\`\`\`\nKlik tombol di bawah, lalu ketik kodenya dan tanggal ulang tahunmu (berlaku 3 menit).`,
     components: [row],
     flags: EPHEMERAL,
   });
@@ -110,7 +111,8 @@ async function showCodeModal(i) {
     .addComponents(
       new ActionRowBuilder().addComponents(
         new TextInputBuilder().setCustomId('code').setLabel('Ketik kode yang kamu terima').setStyle(TextInputStyle.Short).setMinLength(3).setMaxLength(12).setRequired(true)
-      )
+      ),
+      birthdayInputRow()
     );
   return i.showModal(modal);
 }
@@ -122,11 +124,22 @@ async function checkCode(i) {
     pending.delete(key);
     return i.reply({ content: '⌛ Kode kedaluwarsa. Klik **Verifikasi** di panel untuk kode baru.', flags: EPHEMERAL });
   }
+
+  // Validasi tanggal ulang tahun dulu (tidak dihitung sebagai percobaan kode)
+  const bday = parseBirthday(i.fields.getTextInputValue('birthday'));
+  if (!bday) {
+    return i.reply({
+      content: '❌ Format tanggal ulang tahun salah. Pakai `DD/MM` atau `DD/MM/YYYY`, contoh `17/08`. Klik **Masukkan kode** lagi (kodemu masih berlaku).',
+      flags: EPHEMERAL,
+    });
+  }
+
   const input = i.fields.getTextInputValue('code').replace(/\s+/g, '').toUpperCase();
   if (input === p.code) {
     pending.delete(key);
     markVerified(i.guildId, i.user.id);
-    return i.reply({ content: '✅ Verifikasi berhasil! Sekarang pilih **Boy** atau **Girl** di panel untuk membuka channel.', flags: EPHEMERAL });
+    saveBirthday(i.guildId, i.user.id, bday);
+    return i.reply({ content: '✅ Verifikasi berhasil! Tanggal ulang tahunmu tersimpan 🎂\nSekarang pilih **Boy** atau **Girl** di panel untuk membuka channel.', flags: EPHEMERAL });
   }
   p.tries++;
   if (p.tries >= MAX_TRIES) {
@@ -213,7 +226,7 @@ function panelPayload() {
     .setColor(cfg.accent)
     .setTitle('🎭 Ambil Role')
     .setDescription(
-      (VERIFY_ON ? '**1.** Klik **Verifikasi** dan masukkan kode yang muncul.\n**2.** Pilih role di bawah untuk membuka semua channel server.\n\n' : 'Pilih salah satu role di bawah untuk membuka semua channel server.\n\n') +
+      (VERIFY_ON ? '**1.** Klik **Verifikasi**, lalu masukkan kode yang muncul dan tanggal ulang tahunmu.\n**2.** Pilih role di bawah untuk membuka semua channel server.\n\n' : 'Pilih salah satu role di bawah untuk membuka semua channel server.\n\n') +
         `${ROLES.boy.emoji} **Boy**\n${ROLES.girl.emoji} **Girl**\n\n` +
         'Klik tombol role lagi untuk melepasnya. Memilih satu role otomatis mengganti role lainnya.'
     );

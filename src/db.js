@@ -47,6 +47,17 @@ db.exec(`
     guild_id   TEXT PRIMARY KEY,
     channel_id TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS birthdays (
+    guild_id          TEXT NOT NULL,
+    user_id           TEXT NOT NULL,
+    day               INTEGER NOT NULL,
+    month             INTEGER NOT NULL,
+    year              INTEGER,
+    last_greeted_year INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (guild_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_birthdays_dm ON birthdays (month, day);
 `);
 
 // Migrasi: kolom panel pusat untuk voice sementara (aman dijalankan berulang)
