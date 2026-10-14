@@ -189,7 +189,7 @@ function startInviteTracker(client) {
       await sendLog(client, { embeds: [embed] });
     });
   });
-
+}
 // ---------------------------------------------------------------- /invites
 const command = {
   data: new SlashCommandBuilder()
