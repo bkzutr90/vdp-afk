@@ -29,6 +29,11 @@ module.exports = {
   // Server stats: 1 = hitung bot akurat lewat Server Members Intent (aktifkan juga di Developer Portal). 0 = tanpa intent privileged.
   statsUseMembersIntent: process.env.STATS_USE_MEMBERS_INTENT === '1',
 
+  // Invite tracker. Butuh Server Members Intent aktif di Developer Portal. INVITE_TRACKER=0 untuk mematikan.
+  inviteTracker: process.env.INVITE_TRACKER !== '0',
+  inviteChannelId: process.env.INVITE_CHANNEL_ID || null, // channel log join/leave + pengundang. Kosong = tanpa log
+  inviteFakeDays: num(process.env.INVITE_FAKE_DAYS, 3), // akun lebih muda dari ini dihitung fake
+
   // Pesan naik level
   levelUpMessages: process.env.LEVELUP_MESSAGES !== '0',
   levelUpChannelId: process.env.LEVELUP_CHANNEL_ID || null, // kosong = di channel tempat user chat

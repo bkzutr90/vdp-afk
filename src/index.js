@@ -9,15 +9,18 @@ const { startTempVoice, handleTempVoiceInteraction } = require('./tempvoice');
 const { handleSelfRoleInteraction } = require('./selfrole');
 const { startBirthday } = require('./birthday');
 const { startStats } = require('./stats');
+const { startInviteTracker } = require('./invite');
+const { handleSiderInteraction } = require('./sider');
 
 if (!cfg.token) {
   console.error('DISCORD_TOKEN wajib diisi (Variables di Railway / .env)');
   process.exit(1);
 }
 
-// Default tanpa intent privileged. Server Members hanya dipakai kalau STATS_USE_MEMBERS_INTENT=1.
+// Server Members (privileged) dipakai oleh invite tracker dan, opsional, hitungan bot server stats.
 const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages];
-if (cfg.statsUseMembersIntent) intents.push(GatewayIntentBits.GuildMembers);
+if (cfg.statsUseMembersIntent || cfg.inviteTracker) intents.push(GatewayIntentBits.GuildMembers);
+if (cfg.inviteTracker) intents.push(GatewayIntentBits.GuildInvites);
 const client = new Client({ intents });
 
 async function registerCommands(clientId) {
@@ -40,6 +43,7 @@ client.once('clientReady', async () => {
   startTempVoice(client);
   startBirthday(client);
   startStats(client);
+  if (cfg.inviteTracker) startInviteTracker(client);
 });
 
 // ---- XP dari chat (dengan cooldown per user)
@@ -75,6 +79,8 @@ client.on('interactionCreate', async (i) => {
     }
     // Ambil role Boy/Girl + verifikasi (customId diawali "sr:" / "vf:", termasuk modal kode)
     if ((i.isButton() || i.isModalSubmit()) && (await handleSelfRoleInteraction(i))) return;
+    // Tombol "Sudah baca" untuk cek sider (customId "sd:read")
+    if (i.isButton() && (await handleSiderInteraction(i))) return;
     if (i.isButton() && (await handleButton(i))) return;
   } catch (err) {
     console.error('[interaction] error:', err);
