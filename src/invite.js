@@ -157,21 +157,19 @@ function startInviteTracker(client) {
          VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`
       ).run(member.guild.id, member.id, d.inviterId, d.code, d.source, Date.now(), fake);
 
-      let footer = '';
-      if (d.inviterId) {
-        const s = statsOf(member.guild.id, d.inviterId);
-        footer = `Total undangan: ${s.active} aktif • ${s.total} total`;
-      }
+      // Dihitung setelah insert, jadi join ini sudah ikut terhitung (1, lalu 2, 3, 4, ...)
+      const total = d.inviterId ? statsOf(member.guild.id, d.inviterId).total : null;
+
       const embed = new EmbedBuilder()
         .setColor(fake ? 0xe67e22 : 0x2ecc71)
         .setTitle('📥 Member Baru')
         .setThumbnail(member.displayAvatarURL({ extension: 'png', size: 128 }))
-        .setDescription(
-          `${member} bergabung.\nDiundang oleh: ${describeSource(d)}` +
-            (fake ? '\n⚠️ Ditandai **fake** (akun terlalu baru / mengundang diri sendiri).' : '')
+        .setDescription(`${member} bergabung.` + (fake ? '\n⚠️ Ditandai **fake** (akun terlalu baru / mengundang diri sendiri).' : ''))
+        .addFields(
+          { name: 'Diundang oleh', value: describeSource(d), inline: true },
+          { name: 'Total', value: total !== null ? `**${total}**` : '-', inline: true }
         )
         .setTimestamp();
-      if (footer) embed.setFooter({ text: footer });
       await sendLog(client, { embeds: [embed] });
     });
   });
@@ -182,6 +180,7 @@ function startInviteTracker(client) {
       db.prepare('UPDATE invite_joins SET left_at=? WHERE guild_id=? AND user_id=?').run(Date.now(), member.guild.id, member.id);
       const row = joinRow(member.guild.id, member.id);
       const by = row?.inviter_id ? `<@${row.inviter_id}>` : row?.source === 'vanity' ? 'vanity URL' : 'tidak diketahui';
+
       const embed = new EmbedBuilder()
         .setColor(0xe74c3c)
         .setTitle('📤 Member Keluar')
@@ -190,7 +189,6 @@ function startInviteTracker(client) {
       await sendLog(client, { embeds: [embed] });
     });
   });
-}
 
 // ---------------------------------------------------------------- /invites
 const command = {
