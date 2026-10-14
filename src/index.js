@@ -10,7 +10,6 @@ const { handleSelfRoleInteraction } = require('./selfrole');
 const { startBirthday } = require('./birthday');
 const { startStats } = require('./stats');
 const { startInviteTracker } = require('./invite');
-const { handleSiderInteraction } = require('./sider');
 
 if (!cfg.token) {
   console.error('DISCORD_TOKEN wajib diisi (Variables di Railway / .env)');
@@ -79,8 +78,6 @@ client.on('interactionCreate', async (i) => {
     }
     // Ambil role Boy/Girl + verifikasi (customId diawali "sr:" / "vf:", termasuk modal kode)
     if ((i.isButton() || i.isModalSubmit()) && (await handleSelfRoleInteraction(i))) return;
-    // Tombol "Sudah baca" untuk cek sider (customId "sd:read")
-    if (i.isButton() && (await handleSiderInteraction(i))) return;
     if (i.isButton() && (await handleButton(i))) return;
   } catch (err) {
     console.error('[interaction] error:', err);
