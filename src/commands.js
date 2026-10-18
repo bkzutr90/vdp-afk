@@ -312,10 +312,6 @@ commands.set(tempvoiceCommand.data.name, tempvoiceCommand);
 const { command: selfroleCommand } = require('./selfrole');
 commands.set(selfroleCommand.data.name, selfroleCommand);
 
-// ------------------------------------------------------------------ /birthday
-const { command: birthdayCommand } = require('./birthday');
-commands.set(birthdayCommand.data.name, birthdayCommand);
-
 // ------------------------------------------------------------------ /serverstats
 const { command: statsCommand } = require('./stats');
 commands.set(statsCommand.data.name, statsCommand);

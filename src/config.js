@@ -21,9 +21,7 @@ module.exports = {
   // Channel untuk laporan background (/background report)
   reportChannelId: process.env.REPORT_CHANNEL_ID || null,
 
-  // Channel ucapan ulang tahun
-  birthdayChannelId: process.env.BIRTHDAY_CHANNEL_ID || '1558334187554086994',
-  // Zona waktu untuk menentukan "hari ini" (Jakarta = WIB)
+  // Zona waktu (Jakarta = WIB). Dipertahankan kalau dipakai modul lain (mis. stats).
   timezone: process.env.TZ_NAME || 'Asia/Jakarta',
 
   // Server stats: 1 = hitung bot akurat lewat Server Members Intent (aktifkan juga di Developer Portal). 0 = tanpa intent privileged.

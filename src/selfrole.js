@@ -1,6 +1,7 @@
 const {
   SlashCommandBuilder,
   EmbedBuilder,
+  AttachmentBuilder,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -13,7 +14,7 @@ const {
 const crypto = require('crypto');
 const cfg = require('./config');
 const { db } = require('./db');
-const { birthdayInputRow, parseBirthday, saveBirthday } = require('./birthday');
+const { renderCaptcha } = require('./card');
 
 const EPHEMERAL = MessageFlags.Ephemeral;
 
@@ -46,7 +47,7 @@ function canManage(i) {
   return MANAGER_ROLE_IDS.some((id) => i.member?.roles?.cache?.has(id));
 }
 
-// ------------------------------------------------------------------ verifikasi (captcha sederhana + tanggal ulang tahun)
+// ------------------------------------------------------------------ verifikasi (captcha gambar)
 const VERIFY_ON = process.env.SELFROLE_VERIFY !== '0'; // 0 = matikan verifikasi
 const MIN_ACCOUNT_DAYS = Number(process.env.VERIFY_MIN_ACCOUNT_DAYS) || 0; // umur akun minimal (hari), 0 = bebas
 const CODE_TTL = 3 * 60_000;
@@ -90,11 +91,14 @@ async function startVerify(i) {
 
   const code = Array.from({ length: 5 }, () => CODE_CHARS[crypto.randomInt(CODE_CHARS.length)]).join('');
   pending.set(key, { code, expires: Date.now() + CODE_TTL, tries: 0 });
+
+  const png = renderCaptcha(code);
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('vf:enter').setLabel('Masukkan kode').setEmoji('⌨️').setStyle(ButtonStyle.Success)
+    new ButtonBuilder().setCustomId('vf:enter').setLabel('Jawab captcha').setEmoji('⌨️').setStyle(ButtonStyle.Success)
   );
   return i.reply({
-    content: `🔐 **Kode verifikasi kamu:**\n\`\`\`\n${code.split('').join(' ')}\n\`\`\`\nKlik tombol di bawah, lalu ketik kodenya dan tanggal ulang tahunmu (berlaku 3 menit).`,
+    content: '🔐 **Verifikasi Captcha**\nBaca kode pada gambar, klik tombol di bawah, lalu ketik kodenya (berlaku 3 menit, tidak peka huruf besar/kecil).',
+    files: [new AttachmentBuilder(png, { name: 'captcha.png' })],
     components: [row],
     flags: EPHEMERAL,
   });
@@ -103,16 +107,15 @@ async function startVerify(i) {
 async function showCodeModal(i) {
   const p = pending.get(`${i.guildId}:${i.user.id}`);
   if (!p || p.expires < Date.now()) {
-    return i.reply({ content: '⌛ Kode kedaluwarsa. Klik **Verifikasi** di panel untuk kode baru.', flags: EPHEMERAL });
+    return i.reply({ content: '⌛ Captcha kedaluwarsa. Klik **Verifikasi** di panel untuk captcha baru.', flags: EPHEMERAL });
   }
   const modal = new ModalBuilder()
     .setCustomId('vf:modal')
-    .setTitle('Verifikasi')
+    .setTitle('Verifikasi Captcha')
     .addComponents(
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('code').setLabel('Ketik kode yang kamu terima').setStyle(TextInputStyle.Short).setMinLength(3).setMaxLength(12).setRequired(true)
-      ),
-      birthdayInputRow()
+        new TextInputBuilder().setCustomId('code').setLabel('Ketik kode dari gambar').setStyle(TextInputStyle.Short).setMinLength(3).setMaxLength(12).setRequired(true)
+      )
     );
   return i.showModal(modal);
 }
@@ -122,24 +125,14 @@ async function checkCode(i) {
   const p = pending.get(key);
   if (!p || p.expires < Date.now()) {
     pending.delete(key);
-    return i.reply({ content: '⌛ Kode kedaluwarsa. Klik **Verifikasi** di panel untuk kode baru.', flags: EPHEMERAL });
-  }
-
-  // Validasi tanggal ulang tahun dulu (tidak dihitung sebagai percobaan kode)
-  const bday = parseBirthday(i.fields.getTextInputValue('birthday'));
-  if (!bday) {
-    return i.reply({
-      content: '❌ Format tanggal ulang tahun salah. Pakai `DD/MM` atau `DD/MM/YYYY`, contoh `17/08`. Klik **Masukkan kode** lagi (kodemu masih berlaku).',
-      flags: EPHEMERAL,
-    });
+    return i.reply({ content: '⌛ Captcha kedaluwarsa. Klik **Verifikasi** di panel untuk captcha baru.', flags: EPHEMERAL });
   }
 
   const input = i.fields.getTextInputValue('code').replace(/\s+/g, '').toUpperCase();
   if (input === p.code) {
     pending.delete(key);
     markVerified(i.guildId, i.user.id);
-    saveBirthday(i.guildId, i.user.id, bday);
-    return i.reply({ content: '✅ Verifikasi berhasil! Tanggal ulang tahunmu tersimpan 🎂\nSekarang pilih **Boy** atau **Girl** di panel untuk membuka channel.', flags: EPHEMERAL });
+    return i.reply({ content: '✅ Verifikasi berhasil!\nSekarang pilih **Boy** atau **Girl** di panel untuk membuka channel.', flags: EPHEMERAL });
   }
   p.tries++;
   if (p.tries >= MAX_TRIES) {
@@ -147,7 +140,7 @@ async function checkCode(i) {
     locked.set(key, Date.now() + LOCK_MS);
     return i.reply({ content: '❌ Salah 3 kali. Coba lagi dalam 2 menit.', flags: EPHEMERAL });
   }
-  return i.reply({ content: `❌ Kode salah. Sisa percobaan: **${MAX_TRIES - p.tries}**. Klik **Masukkan kode** lagi.`, flags: EPHEMERAL });
+  return i.reply({ content: `❌ Kode salah. Sisa percobaan: **${MAX_TRIES - p.tries}**. Klik **Jawab captcha** lagi (captcha yang sama masih berlaku).`, flags: EPHEMERAL });
 }
 
 const findRole = (guild, key) => guild.roles.cache.find((r) => r.name.toLowerCase() === ROLES[key].name.toLowerCase());
@@ -226,7 +219,7 @@ function panelPayload() {
     .setColor(cfg.accent)
     .setTitle('🎭 Ambil Role')
     .setDescription(
-      (VERIFY_ON ? '**1.** Klik **Verifikasi**, lalu masukkan kode yang muncul dan tanggal ulang tahunmu.\n**2.** Pilih role di bawah untuk membuka semua channel server.\n\n' : 'Pilih salah satu role di bawah untuk membuka semua channel server.\n\n') +
+      (VERIFY_ON ? '**1.** Klik **Verifikasi**, lalu jawab captcha yang muncul.\n**2.** Pilih role di bawah untuk membuka semua channel server.\n\n' : 'Pilih salah satu role di bawah untuk membuka semua channel server.\n\n') +
         `${ROLES.boy.emoji} **Boy**\n${ROLES.girl.emoji} **Girl**\n\n` +
         'Klik tombol role lagi untuk melepasnya. Memilih satu role otomatis mengganti role lainnya.'
     );
@@ -315,7 +308,7 @@ async function handleSelfRoleInteraction(i) {
   // Mengambil role pertama kali wajib verifikasi (yang sudah punya Boy/Girl dianggap terverifikasi)
   const already = member.roles.cache.has(role.id) || (otherRole && member.roles.cache.has(otherRole.id));
   if (VERIFY_ON && !already && !isVerified(i.guildId, i.user.id)) {
-    await i.reply({ content: '🔐 Verifikasi dulu: klik tombol **✅ Verifikasi** di panel, lalu masukkan kodenya.', flags: EPHEMERAL });
+    await i.reply({ content: '🔐 Verifikasi dulu: klik tombol **✅ Verifikasi** di panel, lalu jawab captcha-nya.', flags: EPHEMERAL });
     return true;
   }
 

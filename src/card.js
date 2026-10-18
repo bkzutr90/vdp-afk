@@ -158,4 +158,63 @@ async function renderRankCard({ name, avatar, level, rank, current, needed, back
   return canvas.toBuffer('image/png');
 }
 
-module.exports = { renderRankCard, processBackground };
+// Captcha gambar: huruf miring + noise supaya tidak bisa di-copy / dibaca bot sederhana.
+function renderCaptcha(code) {
+  const CW = 300;
+  const CH = 110;
+  const canvas = createCanvas(CW, CH);
+  const ctx = canvas.getContext('2d');
+  const rnd = (a, b) => Math.random() * (b - a) + a;
+  const color = (min, max) => `rgb(${Math.floor(rnd(min, max))},${Math.floor(rnd(min, max))},${Math.floor(rnd(min, max))})`;
+
+  // Latar
+  const g = ctx.createLinearGradient(0, 0, CW, CH);
+  g.addColorStop(0, '#2b2f3a');
+  g.addColorStop(1, '#1b1d24');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, CW, CH);
+
+  // Noise garis di belakang
+  for (let n = 0; n < 8; n++) {
+    ctx.strokeStyle = color(70, 140);
+    ctx.lineWidth = rnd(1, 3);
+    ctx.beginPath();
+    ctx.moveTo(rnd(0, CW), rnd(0, CH));
+    ctx.bezierCurveTo(rnd(0, CW), rnd(0, CH), rnd(0, CW), rnd(0, CH), rnd(0, CW), rnd(0, CH));
+    ctx.stroke();
+  }
+
+  // Huruf
+  const step = (CW - 60) / code.length;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center';
+  [...code].forEach((ch, idx) => {
+    ctx.save();
+    ctx.translate(40 + step * idx + step / 2, CH / 2 + rnd(-10, 10));
+    ctx.rotate(rnd(-0.5, 0.5));
+    ctx.font = `${Math.floor(rnd(44, 58))}px CardBold`;
+    ctx.fillStyle = color(170, 255);
+    ctx.fillText(ch, 0, 0);
+    ctx.restore();
+  });
+
+  // Garis coretan di atas huruf
+  for (let n = 0; n < 4; n++) {
+    ctx.strokeStyle = color(120, 220);
+    ctx.lineWidth = rnd(1.5, 3);
+    ctx.beginPath();
+    ctx.moveTo(rnd(0, 40), rnd(10, CH - 10));
+    ctx.bezierCurveTo(rnd(60, 120), rnd(0, CH), rnd(180, 240), rnd(0, CH), rnd(CW - 40, CW), rnd(10, CH - 10));
+    ctx.stroke();
+  }
+
+  // Titik noise
+  for (let n = 0; n < 160; n++) {
+    ctx.fillStyle = color(100, 255);
+    ctx.fillRect(rnd(0, CW), rnd(0, CH), 2, 2);
+  }
+
+  return canvas.toBuffer('image/png');
+}
+
+module.exports = { renderRankCard, processBackground, renderCaptcha };

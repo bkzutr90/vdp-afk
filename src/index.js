@@ -7,7 +7,6 @@ const { startAfk } = require('./voice');
 const { startVoiceXp } = require('./voicexp');
 const { startTempVoice, handleTempVoiceInteraction } = require('./tempvoice');
 const { handleSelfRoleInteraction } = require('./selfrole');
-const { startBirthday } = require('./birthday');
 const { startStats } = require('./stats');
 const { startInviteTracker } = require('./invite');
 
@@ -40,7 +39,6 @@ client.once('clientReady', async () => {
   startAfk(client).catch((err) => console.error('[afk] gagal start:', err));
   startVoiceXp(client);
   startTempVoice(client);
-  startBirthday(client);
   startStats(client);
   if (cfg.inviteTracker) startInviteTracker(client);
 });
@@ -76,7 +74,7 @@ client.on('interactionCreate', async (i) => {
       await handleTempVoiceInteraction(i);
       return;
     }
-    // Ambil role Boy/Girl + verifikasi (customId diawali "sr:" / "vf:", termasuk modal kode)
+    // Ambil role Boy/Girl + verifikasi captcha (customId diawali "sr:" / "vf:", termasuk modal kode)
     if ((i.isButton() || i.isModalSubmit()) && (await handleSelfRoleInteraction(i))) return;
     if (i.isButton() && (await handleButton(i))) return;
   } catch (err) {
